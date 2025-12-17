@@ -1,0 +1,232 @@
+using System;
+using System.Data;
+using System.Globalization;
+using System.Data.SqlTypes;
+using System.Data.SqlClient;
+namespace SEM_desarrolloIV
+{
+    class Program
+    {
+        private const string ConnectionString = "server=AIORIA; database=ventas; integrated security=true; TrustServerCertificate=True";
+
+        // MENÚ
+        public void Menu()
+        {
+            Console.WriteLine("1. añadir pedido");
+            Console.WriteLine("2. ver pedidos");
+            Console.WriteLine("3. Actualizar pedido");
+            Console.WriteLine("4. Eliminacion pedido");
+            Console.WriteLine("5. Salir");
+        }
+
+
+        private int ReadInt(string prompt)
+        {
+            int value;
+            do
+            {
+                Console.Write(prompt);
+                if (!int.TryParse(Console.ReadLine(), out value))
+                {
+                    Console.WriteLine("Entrada no válida. Inténtalo de nuevo.");
+                }
+                else break;
+            } while (true);
+            return value;
+        }
+
+
+        // CREATE
+        public void AgregarPedido()
+        {
+            int id = ReadInt("ID: ");
+            Console.Write("Referencia o codigo del producto: ");
+            string refe = Console.ReadLine() ?? string.Empty;
+            Console.Write("Descripcion del producto: ");
+            string descrip = Console.ReadLine() ?? string.Empty;
+            int cant = ReadInt("Cantidad: ");
+            decimal precio = ReadDecimal("Precio: ");
+            int idmarca = ReadInt("ID Marca (1 adidas, 2 tommy, 3 nestle): ");
+
+            string consultaCheck = "SELECT COUNT(1) FROM pedidos WHERE id = @id";
+            string consultaInsert = @"INSERT INTO pedidos (id, [ref], descrip, cant, precio, idmarca)
+                                VALUES (@id, @ref, @descrip, @cant, @precio, @idmarca)";
+
+            try
+            {
+                using var conexion = new SqlConnection(ConnectionString);
+                conexion.Open();
+
+                using (var cmdCheck = new SqlCommand(consultaCheck, conexion))
+                {
+                    cmdCheck.Parameters.Add("@id", SqlDbType.Int).Value = id;
+                    int exists = Convert.ToInt32(cmdCheck.ExecuteScalar());
+                    if (exists > 0)
+                    {
+                        Console.WriteLine("Ya existe un pedido con ese ID. Operación cancelada.");
+                        return;
+                    }
+                }
+
+                using var comando = new SqlCommand(consultaInsert, conexion);
+                comando.Parameters.Add("@id", SqlDbType.Int).Value = id;
+                comando.Parameters.Add("@ref", SqlDbType.NVarChar, 100).Value = (object)refe ?? DBNull.Value;
+                comando.Parameters.Add("@descrip", SqlDbType.NVarChar, 250).Value = (object)descrip ?? DBNull.Value;
+                comando.Parameters.Add("@cant", SqlDbType.Int).Value = cant;
+                var pPrecio = comando.Parameters.Add("@precio", SqlDbType.Decimal);
+                pPrecio.Precision = 18;
+                pPrecio.Scale = 2;
+                pPrecio.Value = precio;
+                comando.Parameters.Add("@idmarca", SqlDbType.Int).Value = idmarca;
+
+                comando.ExecuteNonQuery();
+
+                Console.WriteLine("Pedido agregado correctamente.");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("Error al agregar pedido: " + ex.Message);
+            }
+        }
+
+        private decimal ReadDecimal(string prompt)
+        {
+            decimal value;
+            do
+            {
+                Console.Write(prompt);
+                if (!decimal.TryParse(Console.ReadLine(), NumberStyles.Number, CultureInfo.CurrentCulture, out value))
+                {
+                    Console.WriteLine("Entrada no válida. Inténtalo de nuevo.");
+                }
+                else break;
+            } while (true);
+            return value;
+        }
+
+       
+
+        // READ (con descripcion, monto y marca)
+        public void MostrarPedidos()
+        {
+            string consulta = @"
+    SELECT p.id, p.[ref], p.descrip, p.cant, p.precio,
+           (p.cant * p.precio) AS monto,
+           m.marca
+    FROM pedidos p
+    INNER JOIN marcas m ON p.idmarca = m.idmarca";
+
+            try
+            {
+                using var conexion = new SqlConnection(ConnectionString);
+                conexion.Open();
+
+                using var comando = new SqlCommand(consulta, conexion);
+                using var lector = comando.ExecuteReader();
+
+                Console.WriteLine("=== LISTA DE PEDIDOS ===");
+
+                while (lector.Read())
+                {
+                    var precio = lector["precio"] is decimal dPrecio ? dPrecio : Convert.ToDecimal(lector["precio"]);
+                    var monto = lector["monto"] is decimal dMonto ? dMonto : Convert.ToDecimal(lector["monto"]);
+
+                    Console.WriteLine($"ID: {lector["id"]}");
+                    Console.WriteLine($"Ref: {lector["ref"]}");
+                    Console.WriteLine($"Descripcion: {lector["descrip"]}");
+                    Console.WriteLine($"Cantidad: {lector["cant"]}");
+                    Console.WriteLine($"Precio: {precio.ToString("N2", CultureInfo.CurrentCulture)}");
+                    Console.WriteLine($"Monto: {monto.ToString("N2", CultureInfo.CurrentCulture)}");
+                    Console.WriteLine($"Marca: {lector["marca"]}");
+                    Console.WriteLine("-----------------------");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("Error al mostrar pedidos: " + ex.Message);
+            }
+        }
+
+        // UPDATE
+        public void ActualizarPedido()
+        {
+            int idActualizar = ReadInt("ID del pedido a actualizar: ");
+            int nuevaCant = ReadInt("Nueva cantidad: ");
+
+            string consulta = "UPDATE pedidos SET cant = @cant WHERE id = @id";
+
+            try
+            {
+                using var conexion = new SqlConnection(ConnectionString);
+                conexion.Open();
+
+                using var comando = new SqlCommand(consulta, conexion);
+                comando.Parameters.Add("@cant", SqlDbType.Int).Value = nuevaCant;
+                comando.Parameters.Add("@id", SqlDbType.Int).Value = idActualizar;
+
+                int filas = comando.ExecuteNonQuery();
+
+                Console.WriteLine(filas > 0
+                    ? "Pedido actualizado."
+                    : "Pedido no encontrado.");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("Error al actualizar pedido: " + ex.Message);
+            }
+        }
+
+        // DELETE
+        public void EliminarPedido()
+        {
+            int idEliminar = ReadInt("ID del pedido a eliminar: ");
+
+            string consulta = "DELETE FROM pedidos WHERE id = @id";
+
+            try
+            {
+                using var conexion = new SqlConnection(ConnectionString);
+                conexion.Open();
+
+                using var comando = new SqlCommand(consulta, conexion);
+                comando.Parameters.Add("@id", SqlDbType.Int).Value = idEliminar;
+
+                int filas = comando.ExecuteNonQuery();
+
+                Console.WriteLine(filas > 0
+                    ? "Pedido eliminado."
+                    : "Pedido no encontrado.");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("Error al eliminar pedido: " + ex.Message);
+            }
+        }
+
+        static void Main(string[] args)
+        {
+            Program p = new Program();
+            int opcion;
+
+            do
+            {
+                Console.Clear();
+                p.Menu();
+                Console.Write("Opción: ");
+                int.TryParse(Console.ReadLine(), out opcion);
+
+                if (opcion == 1) p.AgregarPedido();
+                else if (opcion == 2) p.MostrarPedidos();
+                else if (opcion == 3) p.ActualizarPedido();
+                else if (opcion == 4) p.EliminarPedido();
+
+                if (opcion != 5)
+                {
+                    Console.WriteLine("Presione una tecla...");
+                    Console.ReadKey();
+                }
+
+            } while (opcion != 5);
+        }
+    }
+}
